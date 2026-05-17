@@ -1,0 +1,76 @@
+<?xml version="1.0" encoding="utf-8"?>
+<Project ToolsVersion="15.0" xmlns="http://schemas.microsoft.com/developer/msbuild/2003">
+  <Import Project="$(MSBuildToolsPath)\Microsoft.CSharp.targets" Condition="false" />
+  <PropertyGroup>
+    <Configuration Condition=" '$(Configuration)' == '' ">Release</Configuration>
+    <Platform Condition=" '$(Platform)' == '' ">AnyCPU</Platform>
+    <ProjectGuid>{7B77C0DB-99D9-42E9-BF22-DF4B1F26360B}</ProjectGuid>
+    <OutputType>WinExe</OutputType>
+    <RootNamespace>TrayTranslator</RootNamespace>
+    <AssemblyName>TrayTranslator</AssemblyName>
+    <TargetFrameworkVersion>v4.5</TargetFrameworkVersion>
+    <FileAlignment>512</FileAlignment>
+    <AutoGenerateBindingRedirects>true</AutoGenerateBindingRedirects>
+    <ApplicationManifest>app.manifest</ApplicationManifest>
+  </PropertyGroup>
+  <PropertyGroup Condition=" '$(Configuration)|$(Platform)' == 'Debug|AnyCPU' ">
+    <DebugSymbols>true</DebugSymbols>
+    <DebugType>full</DebugType>
+    <Optimize>false</Optimize>
+    <OutputPath>bin\Debug\</OutputPath>
+    <DefineConstants>DEBUG;TRACE</DefineConstants>
+    <ErrorReport>prompt</ErrorReport>
+    <WarningLevel>4</WarningLevel>
+    <Prefer32Bit>false</Prefer32Bit>
+  </PropertyGroup>
+  <PropertyGroup Condition=" '$(Configuration)|$(Platform)' == 'Release|AnyCPU' ">
+    <DebugType>pdbonly</DebugType>
+    <Optimize>true</Optimize>
+    <OutputPath>bin\Release\</OutputPath>
+    <DefineConstants>TRACE</DefineConstants>
+    <ErrorReport>prompt</ErrorReport>
+    <WarningLevel>4</WarningLevel>
+    <Prefer32Bit>false</Prefer32Bit>
+  </PropertyGroup>
+  <ItemGroup>
+    <Reference Include="System" />
+    <Reference Include="System.Configuration" />
+    <Reference Include="System.Core" />
+    <Reference Include="System.Drawing" />
+    <Reference Include="System.Net.Http" />
+    <Reference Include="System.Security" />
+    <Reference Include="System.Web.Extensions" />
+    <Reference Include="System.Windows.Forms" />
+    <Reference Include="UIAutomationClient" />
+    <Reference Include="UIAutomationTypes" />
+    <Reference Include="System.Xml" />
+  </ItemGroup>
+  <ItemGroup>
+    <Compile Include="Program.cs" />
+    <Compile Include="Properties\AssemblyInfo.cs" />
+    <Compile Include="App\TrayTranslatorContext.cs" />
+    <Compile Include="Models\AppSettings.cs" />
+    <Compile Include="Models\SelectionResult.cs" />
+    <Compile Include="Models\TranslationResult.cs" />
+    <Compile Include="Services\HotkeyForm.cs" />
+    <Compile Include="Services\IconFactory.cs" />
+    <Compile Include="Services\SecretProtector.cs" />
+    <Compile Include="Services\SelectionService.cs" />
+    <Compile Include="Services\SettingsService.cs" />
+    <Compile Include="Services\TextPreprocessor.cs" />
+    <Compile Include="Services\TranslationCoordinator.cs" />
+    <Compile Include="Translators\BaiduTranslator.cs" />
+    <Compile Include="Translators\DeepLTranslator.cs" />
+    <Compile Include="Translators\DeepSeekTranslator.cs" />
+    <Compile Include="Translators\GoogleTranslator.cs" />
+    <Compile Include="Translators\ITranslator.cs" />
+    <Compile Include="UI\PopupForm.cs" />
+    <Compile Include="UI\SettingsForm.cs" />
+  </ItemGroup>
+  <ItemGroup>
+    <None Include="App.config" />
+    <None Include="app.manifest" />
+    <None Include="README.md" />
+  </ItemGroup>
+  <Import Project="$(MSBuildToolsPath)\Microsoft.CSharp.targets" />
+</Project>
