@@ -10,11 +10,19 @@ namespace TrayTranslator.UI
     public class PopupForm : Form
     {
         private const int WmNclButtonDown = 0x00A1;
+        private const int WmNcHitTest = 0x0084;
         private const int HtCaption = 0x0002;
+        private const int HtRight = 0x000B;
+        private const int HtBottom = 0x000F;
+        private const int HtBottomRight = 0x0011;
+        private const int ResizeBorder = 8;
 
         private readonly Label _titleLabel;
+        private readonly Label _fromLabel;
+        private readonly Label _toLabel;
         private readonly ComboBox _sourceLanguage;
         private readonly ComboBox _targetLanguage;
+        private readonly Button _closeButton;
         private readonly Label _sourceLabel;
         private readonly Label _noticeLabel;
         private readonly ResultCard _deepLCard;
@@ -46,6 +54,7 @@ namespace TrayTranslator.UI
             StartPosition = FormStartPosition.Manual;
             TopMost = true;
             Size = new Size(660, 680);
+            MinimumSize = new Size(620, 520);
             Padding = new Padding(18);
 
             _titleLabel = new Label
@@ -60,7 +69,7 @@ namespace TrayTranslator.UI
                 TextAlign = ContentAlignment.MiddleLeft
             };
 
-            Label fromLabel = new Label
+            _fromLabel = new Label
             {
                 Text = "从",
                 AutoSize = false,
@@ -81,7 +90,7 @@ namespace TrayTranslator.UI
                 Font = new Font("Microsoft YaHei UI", Math.Max(9F, _uiFontSize - 0.5F))
             };
 
-            Label toLabel = new Label
+            _toLabel = new Label
             {
                 Text = "到",
                 AutoSize = false,
@@ -106,7 +115,7 @@ namespace TrayTranslator.UI
             _sourceLanguage.SelectedIndexChanged += LanguageCombo_SelectedIndexChanged;
             _targetLanguage.SelectedIndexChanged += LanguageCombo_SelectedIndexChanged;
 
-            Button closeButton = new Button
+            _closeButton = new Button
             {
                 Text = "×",
                 FlatStyle = FlatStyle.Flat,
@@ -117,9 +126,9 @@ namespace TrayTranslator.UI
                 Size = new Size(32, 32),
                 TabStop = false
             };
-            closeButton.FlatAppearance.BorderSize = 0;
-            closeButton.FlatAppearance.MouseOverBackColor = Color.FromArgb(241, 245, 249);
-            closeButton.Click += (sender, args) => Close();
+            _closeButton.FlatAppearance.BorderSize = 0;
+            _closeButton.FlatAppearance.MouseOverBackColor = Color.FromArgb(241, 245, 249);
+            _closeButton.Click += (sender, args) => Close();
 
             _sourceLabel = new Label
             {
@@ -145,13 +154,17 @@ namespace TrayTranslator.UI
             _googleCard = new ResultCard("Google", "可选", new Point(24, 282), new Size(612, 104), Color.FromArgb(66, 133, 244), _uiFontSize);
             _baiduCard = new ResultCard("百度", "API Key", new Point(24, 396), new Size(612, 104), Color.FromArgb(41, 98, 255), _uiFontSize);
             _aiCard = new ResultCard("AI", "DeepSeek", new Point(24, 510), new Size(612, 132), Color.FromArgb(125, 92, 255), _uiFontSize);
+            _deepLCard.ExpandRequested += ResultCard_ExpandRequested;
+            _googleCard.ExpandRequested += ResultCard_ExpandRequested;
+            _baiduCard.ExpandRequested += ResultCard_ExpandRequested;
+            _aiCard.ExpandRequested += ResultCard_ExpandRequested;
 
             Controls.Add(_titleLabel);
-            Controls.Add(fromLabel);
+            Controls.Add(_fromLabel);
             Controls.Add(_sourceLanguage);
-            Controls.Add(toLabel);
+            Controls.Add(_toLabel);
             Controls.Add(_targetLanguage);
-            Controls.Add(closeButton);
+            Controls.Add(_closeButton);
             Controls.Add(_sourceLabel);
             Controls.Add(_noticeLabel);
             Controls.Add(_deepLCard);
@@ -161,10 +174,11 @@ namespace TrayTranslator.UI
 
             MakeDraggable(this);
             MakeDraggable(_titleLabel);
-            MakeDraggable(fromLabel);
-            MakeDraggable(toLabel);
+            MakeDraggable(_fromLabel);
+            MakeDraggable(_toLabel);
             MakeDraggable(_sourceLabel);
             MakeDraggable(_noticeLabel);
+            LayoutControls();
         }
 
         public string SourceLanguageCode => GetSelectedCode(_sourceLanguage, "auto");
@@ -293,12 +307,109 @@ namespace TrayTranslator.UI
             {
                 e.Graphics.DrawRectangle(pen, 0, 0, Width - 1, Height - 1);
             }
+
+            ControlPaint.DrawSizeGrip(
+                e.Graphics,
+                Color.FromArgb(180, 190, 204),
+                new Rectangle(Width - 19, Height - 19, 16, 16));
         }
 
         protected override void OnHandleCreated(EventArgs e)
         {
             base.OnHandleCreated(e);
+            UpdateRoundedRegion();
+        }
+
+        protected override void OnResize(EventArgs e)
+        {
+            base.OnResize(e);
+            LayoutControls();
+            UpdateRoundedRegion();
+            Invalidate();
+        }
+
+        protected override void WndProc(ref Message m)
+        {
+            if (m.Msg == WmNcHitTest)
+            {
+                base.WndProc(ref m);
+                Point cursor = PointToClient(Cursor.Position);
+                bool right = cursor.X >= Width - ResizeBorder;
+                bool bottom = cursor.Y >= Height - ResizeBorder;
+
+                if (right && bottom)
+                {
+                    m.Result = (IntPtr)HtBottomRight;
+                    return;
+                }
+
+                if (right)
+                {
+                    m.Result = (IntPtr)HtRight;
+                    return;
+                }
+
+                if (bottom)
+                {
+                    m.Result = (IntPtr)HtBottom;
+                    return;
+                }
+
+                return;
+            }
+
+            base.WndProc(ref m);
+        }
+
+        private void UpdateRoundedRegion()
+        {
+            if (!IsHandleCreated)
+            {
+                return;
+            }
+
             Region = Region.FromHrgn(CreateRoundRectRgn(0, 0, Width + 1, Height + 1, 16, 16));
+        }
+
+        private void LayoutControls()
+        {
+            if (_titleLabel == null || _sourceLabel == null || _deepLCard == null || _aiCard == null)
+            {
+                return;
+            }
+
+            int margin = 24;
+            int width = Math.Max(200, ClientSize.Width - margin * 2);
+
+            _closeButton.SetBounds(ClientSize.Width - 50, 15, 32, 32);
+            int languageRight = Math.Min(ClientSize.Width - 112, 548);
+            _targetLanguage.SetBounds(languageRight - 128, 18, 128, 26);
+            _toLabel.SetBounds(_targetLanguage.Left - 26, 20, 24, 24);
+            _sourceLanguage.SetBounds(_toLabel.Left - 116, 18, 108, 26);
+            _fromLabel.SetBounds(_sourceLanguage.Left - 26, 20, 24, 24);
+            _titleLabel.SetBounds(margin, 18, Math.Max(140, _fromLabel.Left - margin - 18), 28);
+
+            _sourceLabel.SetBounds(margin, 72, width, 56);
+            _noticeLabel.SetBounds(margin + 2, 136, Math.Max(120, width - 4), 20);
+
+            int top = 164;
+            int gap = 10;
+            int bottomMargin = 28;
+            int available = Math.Max(360, ClientSize.Height - top - bottomMargin - gap * 3);
+            int baseCardHeight = Math.Max(96, available / 4);
+            int used = baseCardHeight * 3;
+            int lastHeight = Math.Max(108, available - used);
+
+            _deepLCard.SetBounds(margin, top, width, baseCardHeight);
+            _googleCard.SetBounds(margin, _deepLCard.Bottom + gap, width, baseCardHeight);
+            _baiduCard.SetBounds(margin, _googleCard.Bottom + gap, width, baseCardHeight);
+            _aiCard.SetBounds(margin, _baiduCard.Bottom + gap, width, lastHeight);
+        }
+
+        private void ResultCard_ExpandRequested(object sender, ResultExpandEventArgs e)
+        {
+            var reader = new ReaderForm(e.EngineName, e.Text, _uiFontSize);
+            reader.Show(this);
         }
 
         private void MakeDraggable(Control control)
@@ -447,12 +558,25 @@ namespace TrayTranslator.UI
         [DllImport("user32.dll")]
         private static extern IntPtr SendMessage(IntPtr hWnd, int msg, IntPtr wParam, IntPtr lParam);
 
+        private class ResultExpandEventArgs : EventArgs
+        {
+            public string EngineName { get; private set; }
+            public string Text { get; private set; }
+
+            public ResultExpandEventArgs(string engineName, string text)
+            {
+                EngineName = engineName;
+                Text = text;
+            }
+        }
+
         private class ResultCard : Panel
         {
             private readonly Label _title;
             private readonly Label _badge;
             private readonly Label _status;
             private readonly RichTextBox _body;
+            private readonly Button _expand;
             private readonly Button _copy;
             private readonly Color _accent;
             private readonly Font _cjkFont;
@@ -460,6 +584,7 @@ namespace TrayTranslator.UI
             private readonly Font _titleFont;
             private readonly Font _badgeFont;
             private string _currentText = "";
+            public event EventHandler<ResultExpandEventArgs> ExpandRequested;
 
             public ResultCard(string title, string badge, Point location, Size size, Color accent, float uiFontSize)
             {
@@ -529,6 +654,28 @@ namespace TrayTranslator.UI
                     }
                 };
 
+                _expand = new Button
+                {
+                    Text = "展开",
+                    Enabled = false,
+                    FlatStyle = FlatStyle.Flat,
+                    Font = _cjkFont,
+                    ForeColor = accent,
+                    BackColor = SurfaceColor,
+                    Location = new Point(size.Width - 142, 7),
+                    Size = new Size(62, 28),
+                    TabStop = false
+                };
+                _expand.FlatAppearance.BorderColor = Color.FromArgb(205, 222, 246);
+                _expand.FlatAppearance.MouseOverBackColor = Color.FromArgb(245, 249, 255);
+                _expand.Click += (sender, args) =>
+                {
+                    if (!string.IsNullOrWhiteSpace(_currentText))
+                    {
+                        ExpandRequested?.Invoke(this, new ResultExpandEventArgs(_title.Text, _currentText));
+                    }
+                };
+
                 _body = new RichTextBox
                 {
                     BorderStyle = BorderStyle.None,
@@ -546,6 +693,7 @@ namespace TrayTranslator.UI
                 Controls.Add(_title);
                 Controls.Add(_badge);
                 Controls.Add(_status);
+                Controls.Add(_expand);
                 Controls.Add(_copy);
                 Controls.Add(_body);
             }
@@ -557,6 +705,7 @@ namespace TrayTranslator.UI
                 _status.ForeColor = MutedColor;
                 SetBodyText("正在请求...", false);
                 _copy.Enabled = false;
+                _expand.Enabled = false;
             }
 
             public void SetResult(string text, TimeSpan elapsed)
@@ -566,6 +715,7 @@ namespace TrayTranslator.UI
                 _status.ForeColor = Color.FromArgb(22, 163, 74);
                 SetBodyText(text, true);
                 _copy.Enabled = true;
+                _expand.Enabled = true;
             }
 
             public void SetError(string error)
@@ -575,6 +725,7 @@ namespace TrayTranslator.UI
                 _status.ForeColor = Color.FromArgb(220, 38, 38);
                 SetBodyText(error, false);
                 _copy.Enabled = false;
+                _expand.Enabled = false;
             }
 
             public void SetSkipped(string reason)
@@ -584,11 +735,41 @@ namespace TrayTranslator.UI
                 _status.ForeColor = MutedColor;
                 SetBodyText(reason, false);
                 _copy.Enabled = false;
+                _expand.Enabled = false;
+            }
+
+            protected override void OnResize(EventArgs e)
+            {
+                base.OnResize(e);
+                if (_copy == null || _expand == null || _status == null || _body == null)
+                {
+                    return;
+                }
+
+                int buttonTop = 7;
+                UpdateRoundedRegion();
+                _copy.SetBounds(Width - 74, buttonTop, 56, 28);
+                _expand.SetBounds(Width - 142, buttonTop, 62, 28);
+                _title.SetBounds(14, 10, 92, 22);
+                _badge.SetBounds(104, 10, 92, 22);
+                _status.SetBounds(205, 10, Math.Max(40, Width - 360), 22);
+                _body.SetBounds(14, 40, Math.Max(100, Width - 28), Math.Max(40, Height - 50));
+                Invalidate();
             }
 
             protected override void OnHandleCreated(EventArgs e)
             {
                 base.OnHandleCreated(e);
+                UpdateRoundedRegion();
+            }
+
+            private void UpdateRoundedRegion()
+            {
+                if (!IsHandleCreated)
+                {
+                    return;
+                }
+
                 Region = Region.FromHrgn(CreateRoundRectRgn(0, 0, Width + 1, Height + 1, 8, 8));
             }
 

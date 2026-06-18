@@ -65,6 +65,7 @@
     <Compile Include="Translators\GoogleTranslator.cs" />
     <Compile Include="Translators\ITranslator.cs" />
     <Compile Include="UI\PopupForm.cs" />
+    <Compile Include="UI\ReaderForm.cs" />
     <Compile Include="UI\SettingsForm.cs" />
   </ItemGroup>
   <ItemGroup>
