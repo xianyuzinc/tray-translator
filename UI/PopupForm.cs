@@ -23,7 +23,8 @@ namespace TrayTranslator.UI
         private readonly ComboBox _sourceLanguage;
         private readonly ComboBox _targetLanguage;
         private readonly Button _closeButton;
-        private readonly Label _sourceLabel;
+        private readonly TextBox _sourceTextBox;
+        private readonly Button _translateButton;
         private readonly Label _noticeLabel;
         private readonly ResultCard _deepLCard;
         private readonly ResultCard _googleCard;
@@ -42,6 +43,7 @@ namespace TrayTranslator.UI
         private bool _updatingLanguages;
 
         public event EventHandler LanguageChanged;
+        public event EventHandler SourceTranslateRequested;
 
         public PopupForm(float uiFontSize)
         {
@@ -130,16 +132,36 @@ namespace TrayTranslator.UI
             _closeButton.FlatAppearance.MouseOverBackColor = Color.FromArgb(241, 245, 249);
             _closeButton.Click += (sender, args) => Close();
 
-            _sourceLabel = new Label
+            _sourceTextBox = new TextBox
             {
-                AutoSize = false,
                 ForeColor = Color.FromArgb(67, 77, 92),
                 BackColor = SurfaceColor,
                 Location = new Point(24, 72),
-                Size = new Size(612, 56),
-                Padding = new Padding(12, 9, 12, 9),
+                Size = new Size(532, 56),
+                Multiline = true,
+                BorderStyle = BorderStyle.None,
+                ScrollBars = ScrollBars.Vertical,
+                AcceptsReturn = true,
+                AcceptsTab = false,
+                Font = new Font("Microsoft YaHei UI", _uiFontSize + 0.2F),
                 Text = "选择文本后按快捷键开始"
             };
+            _sourceTextBox.KeyDown += SourceTextBox_KeyDown;
+
+            _translateButton = new Button
+            {
+                Text = "重译",
+                FlatStyle = FlatStyle.Flat,
+                Font = new Font("Microsoft YaHei UI", Math.Max(9F, _uiFontSize - 0.2F)),
+                ForeColor = AccentColor,
+                BackColor = SurfaceColor,
+                Location = new Point(566, 72),
+                Size = new Size(70, 56),
+                TabStop = false
+            };
+            _translateButton.FlatAppearance.BorderColor = Color.FromArgb(205, 222, 246);
+            _translateButton.FlatAppearance.MouseOverBackColor = Color.FromArgb(245, 249, 255);
+            _translateButton.Click += (sender, args) => RequestSourceTranslate();
 
             _noticeLabel = new Label
             {
@@ -165,7 +187,8 @@ namespace TrayTranslator.UI
             Controls.Add(_toLabel);
             Controls.Add(_targetLanguage);
             Controls.Add(_closeButton);
-            Controls.Add(_sourceLabel);
+            Controls.Add(_sourceTextBox);
+            Controls.Add(_translateButton);
             Controls.Add(_noticeLabel);
             Controls.Add(_deepLCard);
             Controls.Add(_googleCard);
@@ -176,13 +199,13 @@ namespace TrayTranslator.UI
             MakeDraggable(_titleLabel);
             MakeDraggable(_fromLabel);
             MakeDraggable(_toLabel);
-            MakeDraggable(_sourceLabel);
             MakeDraggable(_noticeLabel);
             LayoutControls();
         }
 
         public string SourceLanguageCode => GetSelectedCode(_sourceLanguage, "auto");
         public string TargetLanguageCode => GetSelectedCode(_targetLanguage, "zh");
+        public string SourceEditorText => (_sourceTextBox.Text ?? "").Trim();
 
         public void SetLanguages(string source, string target)
         {
@@ -214,7 +237,7 @@ namespace TrayTranslator.UI
                 return;
             }
 
-            _sourceLabel.Text = Compact(text, 280);
+            _sourceTextBox.Text = text ?? "";
             _noticeLabel.Text = truncated ? "原文较长，已按设置截断后翻译。" : "";
         }
 
@@ -226,7 +249,7 @@ namespace TrayTranslator.UI
                 return;
             }
 
-            _sourceLabel.Text = notice;
+            _sourceTextBox.Text = notice;
             _noticeLabel.Text = "";
             _deepLCard.SetSkipped("未开始");
             _googleCard.SetSkipped("未开始");
@@ -297,10 +320,20 @@ namespace TrayTranslator.UI
                 e.Graphics.FillRectangle(header, 0, 0, Width, 60);
             }
 
+            Rectangle sourceSurface = new Rectangle(
+                _sourceTextBox.Left - 12,
+                _sourceTextBox.Top - 10,
+                _sourceTextBox.Width + 13,
+                _sourceTextBox.Height + 19);
+            using (var surface = new SolidBrush(SurfaceColor))
+            {
+                e.Graphics.FillRectangle(surface, sourceSurface);
+            }
+
             using (var pen = new Pen(SoftBorderColor))
             {
                 e.Graphics.DrawLine(pen, 0, 60, Width, 60);
-                e.Graphics.DrawRectangle(pen, _sourceLabel.Left, _sourceLabel.Top, _sourceLabel.Width - 1, _sourceLabel.Height - 1);
+                e.Graphics.DrawRectangle(pen, sourceSurface);
             }
 
             using (var pen = new Pen(BorderColor))
@@ -373,7 +406,7 @@ namespace TrayTranslator.UI
 
         private void LayoutControls()
         {
-            if (_titleLabel == null || _sourceLabel == null || _deepLCard == null || _aiCard == null)
+            if (_titleLabel == null || _sourceTextBox == null || _deepLCard == null || _aiCard == null)
             {
                 return;
             }
@@ -389,7 +422,9 @@ namespace TrayTranslator.UI
             _fromLabel.SetBounds(_sourceLanguage.Left - 26, 20, 24, 24);
             _titleLabel.SetBounds(margin, 18, Math.Max(140, _fromLabel.Left - margin - 18), 28);
 
-            _sourceLabel.SetBounds(margin, 72, width, 56);
+            int translateButtonWidth = 70;
+            _translateButton.SetBounds(margin + width - translateButtonWidth, 72, translateButtonWidth, 56);
+            _sourceTextBox.SetBounds(margin + 12, 82, Math.Max(120, width - translateButtonWidth - 28), 38);
             _noticeLabel.SetBounds(margin + 2, 136, Math.Max(120, width - 4), 20);
 
             int top = 164;
@@ -410,6 +445,20 @@ namespace TrayTranslator.UI
         {
             var reader = new ReaderForm(e.EngineName, e.Text, _uiFontSize);
             reader.Show(this);
+        }
+
+        private void SourceTextBox_KeyDown(object sender, KeyEventArgs e)
+        {
+            if (e.Control && e.KeyCode == Keys.Enter)
+            {
+                e.SuppressKeyPress = true;
+                RequestSourceTranslate();
+            }
+        }
+
+        private void RequestSourceTranslate()
+        {
+            SourceTranslateRequested?.Invoke(this, EventArgs.Empty);
         }
 
         private void MakeDraggable(Control control)

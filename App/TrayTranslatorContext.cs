@@ -332,6 +332,7 @@ namespace TrayTranslator.App
             _popup = new PopupForm(_settings.UiFontSize);
             _popup.SetLanguages(_settings.SourceLanguage, _settings.TargetLanguage);
             _popup.LanguageChanged += Popup_LanguageChanged;
+            _popup.SourceTranslateRequested += Popup_SourceTranslateRequested;
             _popup.FormClosed += Popup_FormClosed;
         }
 
@@ -350,6 +351,13 @@ namespace TrayTranslator.App
                 return;
             }
 
+            bool truncated;
+            string sourceText = NormalizeManualSourceText(_popup.SourceEditorText, out truncated);
+            if (string.IsNullOrWhiteSpace(sourceText))
+            {
+                return;
+            }
+
             _translationCancellation?.Cancel();
             _translationCancellation = new CancellationTokenSource();
 
@@ -357,7 +365,49 @@ namespace TrayTranslator.App
             _settings.TargetLanguage = _popup.TargetLanguageCode;
             _settingsService.Save(_settings);
 
-            RunAllTranslators(_currentSourceText, _translationCancellation.Token);
+            _currentSourceText = sourceText;
+            _popup.SetSourceText(sourceText, truncated);
+            RunAllTranslators(sourceText, _translationCancellation.Token);
+        }
+
+        private void Popup_SourceTranslateRequested(object sender, EventArgs e)
+        {
+            if (_popup == null || _popup.IsDisposed)
+            {
+                return;
+            }
+
+            bool truncated;
+            string sourceText = NormalizeManualSourceText(_popup.SourceEditorText, out truncated);
+            if (string.IsNullOrWhiteSpace(sourceText))
+            {
+                _popup.SetNotice("请输入要翻译的文本。");
+                return;
+            }
+
+            _translationCancellation?.Cancel();
+            _translationCancellation = new CancellationTokenSource();
+
+            _settings.SourceLanguage = _popup.SourceLanguageCode;
+            _settings.TargetLanguage = _popup.TargetLanguageCode;
+            _currentSourceText = sourceText;
+            _popup.SetSourceText(sourceText, truncated);
+            RunAllTranslators(sourceText, _translationCancellation.Token);
+            StartFollowSelection();
+        }
+
+        private string NormalizeManualSourceText(string text, out bool truncated)
+        {
+            truncated = false;
+            string sourceText = TextPreprocessor.CleanForTranslation(text);
+            int maxCharacters = Math.Max(1, _settings.MaxCharacters);
+            if (sourceText.Length > maxCharacters)
+            {
+                sourceText = sourceText.Substring(0, maxCharacters);
+                truncated = true;
+            }
+
+            return sourceText;
         }
 
         private async void FollowSelectionTimer_Tick(object sender, EventArgs e)
