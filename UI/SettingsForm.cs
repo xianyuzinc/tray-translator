@@ -282,11 +282,13 @@ namespace TrayTranslator.UI
             box.Text = placeholder;
         }
 
-        private static void ConfigureEngineCheck(CheckBox checkBox, string text, int y)
+        private void ConfigureEngineCheck(CheckBox checkBox, string text, int y)
         {
             checkBox.Text = text;
             checkBox.Location = new Point(126, y);
             checkBox.Size = new Size(180, 22);
+            checkBox.ForeColor = Color.FromArgb(15, 23, 42);
+            Controls.Add(checkBox);
         }
 
         private static void ConfigureModifier(CheckBox checkBox, string text, Point location)

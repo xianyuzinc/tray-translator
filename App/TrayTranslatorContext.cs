@@ -1,5 +1,9 @@
 using System;
+using System.Collections.Generic;
+using System.Diagnostics;
+using System.Drawing;
 using System.Runtime.InteropServices;
+using System.Text;
 using System.Threading;
 using System.Threading.Tasks;
 using System.Windows.Forms;
@@ -13,6 +17,10 @@ namespace TrayTranslator.App
     public class TrayTranslatorContext : ApplicationContext
     {
         private const int VkLButton = 0x01;
+        private const int AutoCaptureDragPixels = 8;
+        private static readonly TimeSpan AutoCaptureMinHold = TimeSpan.FromMilliseconds(120);
+        private static readonly TimeSpan DefaultAutoCaptureCooldown = TimeSpan.FromMilliseconds(520);
+        private static readonly TimeSpan OfficeAutoCaptureCooldown = TimeSpan.FromMilliseconds(1800);
 
         private readonly SettingsService _settingsService = new SettingsService();
         private readonly SelectionService _selectionService = new SelectionService();
@@ -29,6 +37,9 @@ namespace TrayTranslator.App
         private AppSettings _settings;
         private string _currentSourceText = "";
         private bool _wasLeftButtonDown;
+        private bool _leftButtonMovedEnough;
+        private Point _leftButtonDownPoint = Point.Empty;
+        private DateTime _leftButtonDownUtc = DateTime.MinValue;
         private DateTime _lastAutoCaptureUtc = DateTime.MinValue;
         private int _captureGeneration;
         private bool _captureActive;
@@ -82,7 +93,20 @@ namespace TrayTranslator.App
 
         private void ShowSettings()
         {
-            using (var form = new SettingsForm(_settingsService.Load()))
+            AppSettings loadedSettings = _settingsService.Load();
+            if (_settingsService.LastLoadFailed)
+            {
+                MessageBox.Show(
+                    "设置文件读取失败，为避免覆盖你的 API 配置，本次不会打开设置保存。\n\n" +
+                    _settingsService.SettingsPath + "\n\n" +
+                    _settingsService.LastLoadError,
+                    "TrayTranslator 设置读取失败",
+                    MessageBoxButtons.OK,
+                    MessageBoxIcon.Warning);
+                return;
+            }
+
+            using (var form = new SettingsForm(loadedSettings))
             {
                 if (form.ShowDialog() == DialogResult.OK)
                 {
@@ -90,6 +114,7 @@ namespace TrayTranslator.App
                     _settingsService.Save(_settings);
                     ApplyHotkey(showFailure: true);
                     UpdateTrayText();
+                    ApplyPopupTranslatorVisibility();
                 }
             }
         }
@@ -135,15 +160,16 @@ namespace TrayTranslator.App
 
             EnsurePopup();
             _popup.SetLanguages(_settings.SourceLanguage, _settings.TargetLanguage);
+            ApplyPopupTranslatorVisibility();
             _popup.SetNotice("正在读取选中文字...");
             _popup.ShowNearCursor();
             _popup.Update();
             StartFollowSelection();
 
-            QueueCapture(sourceWindow, showFailure: true, movePopup: false);
+            QueueCapture(sourceWindow, showFailure: true, movePopup: false, automatic: false);
         }
 
-        private void QueueCapture(IntPtr sourceWindow, bool showFailure, bool movePopup)
+        private void QueueCapture(IntPtr sourceWindow, bool showFailure, bool movePopup, bool automatic)
         {
             var request = new CaptureRequest
             {
@@ -151,7 +177,8 @@ namespace TrayTranslator.App
                 SourceWindow = sourceWindow,
                 MaxCharacters = _settings.MaxCharacters,
                 ShowFailure = showFailure,
-                MovePopup = movePopup
+                MovePopup = movePopup,
+                Automatic = automatic
             };
 
             bool shouldStart = false;
@@ -179,7 +206,7 @@ namespace TrayTranslator.App
             SelectionResult selection;
             try
             {
-                selection = await CaptureOnStaThreadAsync(request.MaxCharacters, request.SourceWindow);
+                selection = await CaptureOnStaThreadAsync(request.MaxCharacters, request.SourceWindow, request.Automatic);
             }
             catch (Exception ex)
             {
@@ -211,14 +238,14 @@ namespace TrayTranslator.App
             }
         }
 
-        private Task<SelectionResult> CaptureOnStaThreadAsync(int maxCharacters, IntPtr sourceWindow)
+        private Task<SelectionResult> CaptureOnStaThreadAsync(int maxCharacters, IntPtr sourceWindow, bool automatic)
         {
             var completion = new TaskCompletionSource<SelectionResult>();
             var thread = new Thread(() =>
             {
                 try
                 {
-                    completion.SetResult(_selectionService.CaptureSelectedText(maxCharacters, sourceWindow));
+                    completion.SetResult(_selectionService.CaptureSelectedText(maxCharacters, sourceWindow, automatic));
                 }
                 catch (Exception ex)
                 {
@@ -277,14 +304,17 @@ namespace TrayTranslator.App
                 return;
             }
 
-            foreach (ITranslator translator in _translationCoordinator.CreateTranslators(_settings))
+            ApplyPopupTranslatorVisibility();
+            IReadOnlyList<ITranslator> translators = _translationCoordinator.CreateTranslators(_settings);
+            if (translators.Count == 0)
             {
-                if (!translator.IsEnabled)
-                {
-                    _popup.SetSkipped(translator.Name, "已在设置中停用。");
-                    continue;
-                }
+                _popup.SetNoticeLine("未启用任何翻译源。请在托盘菜单的设置中至少启用一个。");
+                return;
+            }
 
+            _popup.SetNoticeLine("");
+            foreach (ITranslator translator in translators)
+            {
                 if (!translator.IsConfigured)
                 {
                     _popup.SetSkipped(translator.Name, "未配置 API 密钥。请在托盘菜单中打开设置。");
@@ -331,9 +361,20 @@ namespace TrayTranslator.App
 
             _popup = new PopupForm(_settings.UiFontSize);
             _popup.SetLanguages(_settings.SourceLanguage, _settings.TargetLanguage);
+            _popup.SetEnabledTranslators(_settings);
             _popup.LanguageChanged += Popup_LanguageChanged;
             _popup.SourceTranslateRequested += Popup_SourceTranslateRequested;
             _popup.FormClosed += Popup_FormClosed;
+        }
+
+        private void ApplyPopupTranslatorVisibility()
+        {
+            if (_popup == null || _popup.IsDisposed)
+            {
+                return;
+            }
+
+            _popup.SetEnabledTranslators(_settings);
         }
 
         private void Popup_FormClosed(object sender, FormClosedEventArgs e)
@@ -417,20 +458,27 @@ namespace TrayTranslator.App
                 return;
             }
 
-            short buttonState = GetAsyncKeyState(VkLButton);
-            bool leftButtonDown = (buttonState & 0x8000) != 0;
-            bool clickedSinceLastTick = (buttonState & 0x0001) != 0;
-            bool released = (_wasLeftButtonDown && !leftButtonDown) || (clickedSinceLastTick && !leftButtonDown);
-            _wasLeftButtonDown = leftButtonDown;
+            DateTime now = DateTime.UtcNow;
+            bool leftButtonDown = (GetAsyncKeyState(VkLButton) & 0x8000) != 0;
 
-            if (!released || DateTime.UtcNow - _lastAutoCaptureUtc < TimeSpan.FromMilliseconds(420))
+            if (!TryConsumeSelectionDrag(leftButtonDown, now))
             {
                 return;
             }
 
             await Task.Delay(70);
             IntPtr sourceWindow = GetForegroundWindow();
-            if (sourceWindow == IntPtr.Zero || IsPopupWindow(sourceWindow))
+            IntPtr cursorWindow = WindowFromPoint(new NativePoint(Cursor.Position.X, Cursor.Position.Y));
+            if (sourceWindow == IntPtr.Zero ||
+                IsPopupWindow(sourceWindow) ||
+                IsPopupWindow(cursorWindow) ||
+                IsSystemShellWindow(sourceWindow) ||
+                IsSystemShellWindow(cursorWindow))
+            {
+                return;
+            }
+
+            if (now - _lastAutoCaptureUtc < GetAutoCaptureCooldown(sourceWindow) || IsCaptureActive())
             {
                 return;
             }
@@ -441,16 +489,70 @@ namespace TrayTranslator.App
                 return;
             }
 
-            _lastAutoCaptureUtc = DateTime.UtcNow;
-            QueueCapture(sourceWindow, showFailure: false, movePopup: false);
+            _lastAutoCaptureUtc = now;
+            QueueCapture(sourceWindow, showFailure: false, movePopup: false, automatic: true);
         }
 
         private void StartFollowSelection()
         {
             _wasLeftButtonDown = IsKeyDown(VkLButton);
+            _leftButtonDownPoint = Cursor.Position;
+            _leftButtonDownUtc = DateTime.UtcNow;
+            _leftButtonMovedEnough = false;
             if (!_followSelectionTimer.Enabled)
             {
                 _followSelectionTimer.Start();
+            }
+        }
+
+        private bool TryConsumeSelectionDrag(bool leftButtonDown, DateTime now)
+        {
+            Point cursor = Cursor.Position;
+            bool pressed = leftButtonDown && !_wasLeftButtonDown;
+            bool released = _wasLeftButtonDown && !leftButtonDown;
+
+            if (pressed)
+            {
+                _leftButtonDownPoint = cursor;
+                _leftButtonDownUtc = now;
+                _leftButtonMovedEnough = false;
+            }
+
+            if (leftButtonDown)
+            {
+                if (HasMovedEnough(cursor))
+                {
+                    _leftButtonMovedEnough = true;
+                }
+
+                _wasLeftButtonDown = true;
+                return false;
+            }
+
+            _wasLeftButtonDown = false;
+            if (!released)
+            {
+                return false;
+            }
+
+            bool heldLongEnough = now - _leftButtonDownUtc >= AutoCaptureMinHold;
+            bool movedEnough = _leftButtonMovedEnough || HasMovedEnough(cursor);
+            _leftButtonMovedEnough = false;
+            return heldLongEnough && movedEnough;
+        }
+
+        private bool HasMovedEnough(Point cursor)
+        {
+            int dx = cursor.X - _leftButtonDownPoint.X;
+            int dy = cursor.Y - _leftButtonDownPoint.Y;
+            return dx * dx + dy * dy >= AutoCaptureDragPixels * AutoCaptureDragPixels;
+        }
+
+        private bool IsCaptureActive()
+        {
+            lock (_captureLock)
+            {
+                return _captureActive;
             }
         }
 
@@ -462,6 +564,104 @@ namespace TrayTranslator.App
             }
 
             return foreground == _popup.Handle || IsChild(_popup.Handle, foreground);
+        }
+
+        private static bool IsSystemShellWindow(IntPtr window)
+        {
+            if (window == IntPtr.Zero)
+            {
+                return false;
+            }
+
+            if (IsSystemShellClass(GetWindowClassName(window)))
+            {
+                return true;
+            }
+
+            IntPtr root = GetAncestor(window, 2);
+            if (root != IntPtr.Zero && IsSystemShellClass(GetWindowClassName(root)))
+            {
+                return true;
+            }
+
+            IntPtr parent = GetParent(window);
+            for (int i = 0; parent != IntPtr.Zero && i < 8; i++)
+            {
+                if (IsSystemShellClass(GetWindowClassName(parent)))
+                {
+                    return true;
+                }
+
+                parent = GetParent(parent);
+            }
+
+            return false;
+        }
+
+        private static bool IsSystemShellClass(string className)
+        {
+            if (string.IsNullOrEmpty(className))
+            {
+                return false;
+            }
+
+            return className.Equals("Shell_TrayWnd", StringComparison.OrdinalIgnoreCase) ||
+                   className.Equals("Shell_SecondaryTrayWnd", StringComparison.OrdinalIgnoreCase) ||
+                   className.Equals("NotifyIconOverflowWindow", StringComparison.OrdinalIgnoreCase) ||
+                   className.Equals("TrayNotifyWnd", StringComparison.OrdinalIgnoreCase);
+        }
+
+        private static string GetWindowClassName(IntPtr window)
+        {
+            var builder = new StringBuilder(128);
+            return GetClassName(window, builder, builder.Capacity) == 0 ? "" : builder.ToString();
+        }
+
+        private static TimeSpan GetAutoCaptureCooldown(IntPtr sourceWindow)
+        {
+            return IsOfficeProcessName(GetProcessName(sourceWindow))
+                ? OfficeAutoCaptureCooldown
+                : DefaultAutoCaptureCooldown;
+        }
+
+        private static bool IsOfficeProcessName(string processName)
+        {
+            if (string.IsNullOrEmpty(processName))
+            {
+                return false;
+            }
+
+            return processName.Equals("WINWORD", StringComparison.OrdinalIgnoreCase) ||
+                   processName.Equals("wps", StringComparison.OrdinalIgnoreCase) ||
+                   processName.Equals("et", StringComparison.OrdinalIgnoreCase) ||
+                   processName.Equals("wpp", StringComparison.OrdinalIgnoreCase);
+        }
+
+        private static string GetProcessName(IntPtr window)
+        {
+            try
+            {
+                if (window == IntPtr.Zero)
+                {
+                    return "";
+                }
+
+                IntPtr processId;
+                GetWindowThreadProcessId(window, out processId);
+                if (processId == IntPtr.Zero)
+                {
+                    return "";
+                }
+
+                using (Process process = Process.GetProcessById(processId.ToInt32()))
+                {
+                    return process.ProcessName;
+                }
+            }
+            catch
+            {
+                return "";
+            }
         }
 
         protected override void ExitThreadCore()
@@ -528,6 +728,7 @@ namespace TrayTranslator.App
             public int MaxCharacters { get; set; }
             public bool ShowFailure { get; set; }
             public bool MovePopup { get; set; }
+            public bool Automatic { get; set; }
         }
 
         [DllImport("user32.dll")]
@@ -538,5 +739,33 @@ namespace TrayTranslator.App
 
         [DllImport("user32.dll")]
         private static extern bool IsChild(IntPtr hWndParent, IntPtr hWnd);
+
+        [DllImport("user32.dll")]
+        private static extern IntPtr WindowFromPoint(NativePoint point);
+
+        [DllImport("user32.dll", CharSet = CharSet.Auto)]
+        private static extern int GetClassName(IntPtr hWnd, StringBuilder lpClassName, int nMaxCount);
+
+        [DllImport("user32.dll")]
+        private static extern IntPtr GetParent(IntPtr hWnd);
+
+        [DllImport("user32.dll")]
+        private static extern IntPtr GetAncestor(IntPtr hWnd, uint gaFlags);
+
+        [DllImport("user32.dll")]
+        private static extern uint GetWindowThreadProcessId(IntPtr hWnd, out IntPtr processId);
+
+        [StructLayout(LayoutKind.Sequential)]
+        private struct NativePoint
+        {
+            public int X;
+            public int Y;
+
+            public NativePoint(int x, int y)
+            {
+                X = x;
+                Y = y;
+            }
+        }
     }
 }

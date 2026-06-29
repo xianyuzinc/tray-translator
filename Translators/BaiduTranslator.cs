@@ -31,7 +31,6 @@ namespace TrayTranslator.Translators
         }
 
         public string Name => "百度";
-        public bool IsEnabled => _settings.BaiduEnabled;
         public bool IsConfigured => !string.IsNullOrWhiteSpace(_apiKey) ||
                                     (!string.IsNullOrWhiteSpace(_settings.BaiduAppId) && !string.IsNullOrWhiteSpace(_secretKey));
 

@@ -11,6 +11,8 @@ namespace TrayTranslator.Services
 
         public string SettingsDirectory { get; }
         public string SettingsPath { get; }
+        public bool LastLoadFailed { get; private set; }
+        public string LastLoadError { get; private set; }
 
         public SettingsService()
         {
@@ -22,6 +24,9 @@ namespace TrayTranslator.Services
 
         public AppSettings Load()
         {
+            LastLoadFailed = false;
+            LastLoadError = "";
+
             try
             {
                 if (!File.Exists(SettingsPath))
@@ -33,14 +38,21 @@ namespace TrayTranslator.Services
                 AppSettings settings = _serializer.Deserialize<AppSettings>(json);
                 return Normalize(settings ?? new AppSettings());
             }
-            catch
+            catch (Exception ex)
             {
+                LastLoadFailed = true;
+                LastLoadError = ex.Message;
                 return new AppSettings();
             }
         }
 
         public void Save(AppSettings settings)
         {
+            if (LastLoadFailed && File.Exists(SettingsPath))
+            {
+                return;
+            }
+
             Directory.CreateDirectory(SettingsDirectory);
             string json = _serializer.Serialize(Normalize(settings));
             File.WriteAllText(SettingsPath, PrettyJson(json));

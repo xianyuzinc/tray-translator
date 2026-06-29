@@ -26,7 +26,6 @@ namespace TrayTranslator.Translators
         }
 
         public string Name => "Google";
-        public bool IsEnabled => _settings.GoogleEnabled;
         public bool IsConfigured => !string.IsNullOrWhiteSpace(_apiKey);
 
         public async Task<TranslationResult> TranslateAsync(string text, CancellationToken cancellationToken)

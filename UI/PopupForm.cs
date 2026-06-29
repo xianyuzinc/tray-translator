@@ -207,6 +207,22 @@ namespace TrayTranslator.UI
         public string TargetLanguageCode => GetSelectedCode(_targetLanguage, "zh");
         public string SourceEditorText => (_sourceTextBox.Text ?? "").Trim();
 
+        public void SetEnabledTranslators(AppSettings settings)
+        {
+            if (InvokeRequired)
+            {
+                BeginInvoke(new Action<AppSettings>(SetEnabledTranslators), settings);
+                return;
+            }
+
+            SetCardVisible(_deepLCard, settings.DeepLEnabled);
+            SetCardVisible(_googleCard, settings.GoogleEnabled);
+            SetCardVisible(_baiduCard, settings.BaiduEnabled);
+            SetCardVisible(_aiCard, settings.DeepSeekEnabled);
+            LayoutControls();
+            Invalidate();
+        }
+
         public void SetLanguages(string source, string target)
         {
             _updatingLanguages = true;
@@ -255,6 +271,17 @@ namespace TrayTranslator.UI
             _googleCard.SetSkipped("未开始");
             _baiduCard.SetSkipped("未开始");
             _aiCard.SetSkipped("未开始");
+        }
+
+        public void SetNoticeLine(string notice)
+        {
+            if (InvokeRequired)
+            {
+                BeginInvoke(new Action<string>(SetNoticeLine), notice);
+                return;
+            }
+
+            _noticeLabel.Text = notice ?? "";
         }
 
         public void SetLoading(string engineName)
@@ -430,15 +457,33 @@ namespace TrayTranslator.UI
             int top = 164;
             int gap = 10;
             int bottomMargin = 28;
-            int available = Math.Max(360, ClientSize.Height - top - bottomMargin - gap * 3);
-            int baseCardHeight = Math.Max(96, available / 4);
-            int used = baseCardHeight * 3;
-            int lastHeight = Math.Max(108, available - used);
+            ResultCard[] cards = { _deepLCard, _googleCard, _baiduCard, _aiCard };
+            int visibleCount = CountVisibleCards(cards);
+            if (visibleCount == 0)
+            {
+                return;
+            }
 
-            _deepLCard.SetBounds(margin, top, width, baseCardHeight);
-            _googleCard.SetBounds(margin, _deepLCard.Bottom + gap, width, baseCardHeight);
-            _baiduCard.SetBounds(margin, _googleCard.Bottom + gap, width, baseCardHeight);
-            _aiCard.SetBounds(margin, _baiduCard.Bottom + gap, width, lastHeight);
+            int totalGap = gap * Math.Max(0, visibleCount - 1);
+            int available = Math.Max(visibleCount * 96, ClientSize.Height - top - bottomMargin - totalGap);
+            int baseCardHeight = Math.Max(96, available / visibleCount);
+            int y = top;
+            int remaining = available;
+            int index = 0;
+
+            foreach (ResultCard card in cards)
+            {
+                if (!card.Visible)
+                {
+                    continue;
+                }
+
+                int height = index == visibleCount - 1 ? Math.Max(96, remaining) : baseCardHeight;
+                card.SetBounds(margin, y, width, height);
+                y = card.Bottom + gap;
+                remaining -= height;
+                index++;
+            }
         }
 
         private void ResultCard_ExpandRequested(object sender, ResultExpandEventArgs e)
@@ -500,6 +545,30 @@ namespace TrayTranslator.UI
             }
 
             return null;
+        }
+
+        private static void SetCardVisible(ResultCard card, bool visible)
+        {
+            if (!visible)
+            {
+                card.SetSkipped("未开始");
+            }
+
+            card.Visible = visible;
+        }
+
+        private static int CountVisibleCards(ResultCard[] cards)
+        {
+            int count = 0;
+            foreach (ResultCard card in cards)
+            {
+                if (card.Visible)
+                {
+                    count++;
+                }
+            }
+
+            return count;
         }
 
         private void LanguageCombo_SelectedIndexChanged(object sender, EventArgs e)
@@ -580,22 +649,6 @@ namespace TrayTranslator.UI
             {
                 return Label;
             }
-        }
-
-        private static string Compact(string text, int max)
-        {
-            if (string.IsNullOrWhiteSpace(text))
-            {
-                return "";
-            }
-
-            text = text.Replace("\r", " ").Replace("\n", " ").Trim();
-            if (text.Length <= max)
-            {
-                return text;
-            }
-
-            return text.Substring(0, max) + "...";
         }
 
         [DllImport("gdi32.dll")]

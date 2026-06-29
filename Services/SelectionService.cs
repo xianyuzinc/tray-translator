@@ -25,10 +25,19 @@ namespace TrayTranslator.Services
 
         public SelectionResult CaptureSelectedText(int maxCharacters, IntPtr sourceWindow)
         {
+            return CaptureSelectedText(maxCharacters, sourceWindow, automatic: false);
+        }
+
+        public SelectionResult CaptureSelectedText(int maxCharacters, IntPtr sourceWindow, bool automatic)
+        {
             IDataObject originalClipboard = null;
+            bool clipboardSaved = false;
             try
             {
-                RestoreSourceFocus(sourceWindow);
+                if (!automatic)
+                {
+                    RestoreSourceFocus(sourceWindow);
+                }
 
                 string captured = TryGetSelectedTextFromWord(sourceWindow, maxCharacters);
                 if (!string.IsNullOrWhiteSpace(captured))
@@ -36,7 +45,13 @@ namespace TrayTranslator.Services
                     return BuildSuccess(captured, maxCharacters);
                 }
 
+                if (automatic && IsProcessName(sourceWindow, "WINWORD"))
+                {
+                    return SelectionResult.Fail("");
+                }
+
                 originalClipboard = TryGetDataObject();
+                clipboardSaved = originalClipboard != null;
 
                 captured = TryCaptureByClipboard(sourceWindow, SendCtrlC, FastWaitAttempts, FastWaitDelayMs);
                 if (string.IsNullOrWhiteSpace(captured))
@@ -72,7 +87,10 @@ namespace TrayTranslator.Services
             }
             finally
             {
-                RestoreClipboard(originalClipboard);
+                if (clipboardSaved)
+                {
+                    RestoreClipboard(originalClipboard);
+                }
             }
         }
 
@@ -431,21 +449,27 @@ namespace TrayTranslator.Services
                 return;
             }
 
+            uint targetThread = 0;
+            uint foregroundThread = 0;
+            uint currentThread = 0;
+            bool attachedTarget = false;
+            bool attachedForeground = false;
+
             try
             {
                 IntPtr foreground = GetForegroundWindow();
-                uint currentThread = GetCurrentThreadId();
-                uint targetThread = GetWindowThreadProcessId(sourceWindow, IntPtr.Zero);
-                uint foregroundThread = foreground == IntPtr.Zero ? 0 : GetWindowThreadProcessId(foreground, IntPtr.Zero);
+                currentThread = GetCurrentThreadId();
+                targetThread = GetWindowThreadProcessId(sourceWindow, IntPtr.Zero);
+                foregroundThread = foreground == IntPtr.Zero ? 0 : GetWindowThreadProcessId(foreground, IntPtr.Zero);
 
                 if (targetThread != 0)
                 {
-                    AttachThreadInput(currentThread, targetThread, true);
+                    attachedTarget = AttachThreadInput(currentThread, targetThread, true);
                 }
 
                 if (foregroundThread != 0 && foregroundThread != targetThread)
                 {
-                    AttachThreadInput(currentThread, foregroundThread, true);
+                    attachedForeground = AttachThreadInput(currentThread, foregroundThread, true);
                 }
 
                 SetForegroundWindow(sourceWindow);
@@ -456,19 +480,21 @@ namespace TrayTranslator.Services
                 }
 
                 Thread.Sleep(35);
-
-                if (foregroundThread != 0 && foregroundThread != targetThread)
+            }
+            catch
+            {
+            }
+            finally
+            {
+                if (attachedForeground)
                 {
                     AttachThreadInput(currentThread, foregroundThread, false);
                 }
 
-                if (targetThread != 0)
+                if (attachedTarget)
                 {
                     AttachThreadInput(currentThread, targetThread, false);
                 }
-            }
-            catch
-            {
             }
         }
 

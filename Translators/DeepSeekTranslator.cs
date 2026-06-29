@@ -26,7 +26,6 @@ namespace TrayTranslator.Translators
         }
 
         public string Name => "AI";
-        public bool IsEnabled => _settings.DeepSeekEnabled;
         public bool IsConfigured => !string.IsNullOrWhiteSpace(_apiKey);
 
         public async Task<TranslationResult> TranslateAsync(string text, CancellationToken cancellationToken)

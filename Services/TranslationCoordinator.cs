@@ -8,13 +8,29 @@ namespace TrayTranslator.Services
     {
         public IReadOnlyList<ITranslator> CreateTranslators(AppSettings settings)
         {
-            return new ITranslator[]
+            var translators = new List<ITranslator>();
+
+            if (settings.DeepLEnabled)
             {
-                new DeepLTranslator(settings),
-                new GoogleTranslator(settings),
-                new BaiduTranslator(settings),
-                new DeepSeekTranslator(settings)
-            };
+                translators.Add(new DeepLTranslator(settings));
+            }
+
+            if (settings.GoogleEnabled)
+            {
+                translators.Add(new GoogleTranslator(settings));
+            }
+
+            if (settings.BaiduEnabled)
+            {
+                translators.Add(new BaiduTranslator(settings));
+            }
+
+            if (settings.DeepSeekEnabled)
+            {
+                translators.Add(new DeepSeekTranslator(settings));
+            }
+
+            return translators;
         }
     }
 }
